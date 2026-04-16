@@ -1,6 +1,6 @@
 services:
-  - type: worker
-    name: save-combined-bot
+  - type: web
+    name: save-restricted-bot
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: python main.py
@@ -17,3 +17,5 @@ services:
         sync: false
       - key: FORCESUB
         sync: false
+      - key: PORT
+        value: 10000
