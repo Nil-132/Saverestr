@@ -1,7 +1,7 @@
 import os
 import asyncio
 from pyrogram import Client, filters
-from pyrogram.errors import FloodWait, UserAlreadyParticipant, InviteHashExpired
+from pyrogram.errors import FloodWait, UserAlreadyParticipant, InviteHashExpired, PeerIdInvalid
 from pyrogram.types import Message
 from urllib.parse import urlparse, parse_qs
 from fastapi import FastAPI
@@ -17,13 +17,13 @@ FORCESUB = os.environ.get("FORCESUB", "").strip("@")
 PORT = int(os.environ.get("PORT", 10000))
 
 bot = Client("bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-user = Client("user", api_id=API_ID, api_hash=API_HASH, session_string=SESSION)
+user = Client("user", api_id=API_ID, api_hash=API_HASH, session_string=SESSION if SESSION else None)
 
 app = FastAPI()
 
 @app.get("/")
 async def home():
-    return {"status": "✅ Bot is running on Render free tier"}
+    return {"status": "✅ Bot is running (free tier)"}
 
 async def force_sub(message: Message):
     if not FORCESUB:
@@ -41,8 +41,6 @@ async def force_sub(message: Message):
 def parse_link(link: str):
     parsed = urlparse(link)
     path = parsed.path.strip("/").split("/")
-    query = parse_qs(parsed.query)
-    thread_id = int(query.get("thread", [0])[0]) or None
     if "t.me/c/" in link:
         chat_id = int("-100" + path[-2])
         msg_id = int(path[-1])
@@ -75,26 +73,40 @@ async def copy_message(message: Message, chat_id, msg_id, is_private=False):
         else:
             msg = await bot.get_messages(chat_id, msg_id)
             await msg.copy(message.chat.id, reply_to_message_id=message.id)
-        await status.edit_text("**✅ Saved!**")
+        await status.edit_text("**✅ Saved successfully!**")
+    except PeerIdInvalid:
+        await status.edit_text("**❌ This private channel is not accessible yet.** Send invite link first.")
     except FloodWait as e:
         await asyncio.sleep(e.value)
-        await status.edit_text(f"Waited {e.value}s")
+        await status.edit_text(f"Waited {e.value}s due to flood.")
     except Exception as e:
-        await status.edit_text(f"Error: {str(e)[:150]}")
+        await status.edit_text(f"Error: {str(e)[:100]}")
 
+# Handlers
 @bot.on_message(filters.command("start") & filters.private)
-async def start(client, message):
+async def start_cmd(client, message):
     if not await force_sub(message): return
-    await message.reply_text("**✅ Save Restricted Bot Ready!**\nSend any post link.\nSupports private channels & topics.\nOwner: /batch", quote=True)
+    await message.reply_text(
+        "**✅ Save Restricted Bot is Online!**\n\n"
+        "Send any public or private post link.\n"
+        "For private channels: send invite link first.\n"
+        "Owner commands: /batch (coming soon)",
+        quote=True
+    )
 
 @bot.on_message(filters.text & filters.private)
 async def handle_link(client, message):
     if not await force_sub(message): return
     text = message.text.strip()
-    if not text.startswith("https://t.me/"): return
-    chat_id, msg_id, is_private = parse_link(text)[:3]  # ignore thread for now
-    await copy_message(message, chat_id, msg_id, is_private)
+    if not text.startswith("https://t.me/"):
+        return
+    try:
+        chat_id, msg_id, is_private = parse_link(text)
+        await copy_message(message, chat_id, msg_id, is_private)
+    except:
+        await message.reply_text("**Invalid link!** Make sure it's a valid Telegram post link.", quote=True)
 
+# Run
 async def run_bot():
     await user.start()
     print("✅ User client started")
@@ -104,9 +116,10 @@ async def run_bot():
 
 async def main():
     bot_task = asyncio.create_task(run_bot())
-    config = uvicorn.Config(app, host="0.0.0.0", port=PORT, log_level="info")
+    config = uvicorn.Config(app, host="0.0.0.0", port=PORT)
     server = uvicorn.Server(config)
-    await asyncio.gather(bot_task, server.serve())
+    await asyncio.gather(bot_task, server.serve(), return_exceptions=True)
 
 if __name__ == "__main__":
+    print("Starting combined bot...")
     asyncio.run(main())
